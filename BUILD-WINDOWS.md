@@ -1,12 +1,59 @@
-# Building and running ridgerunner on Windows (MinGW / MSYS2)
+# Building and running ridgerunner on Windows
 
-This guide targets **MinGW64 via MSYS2** so you can tighten KnotPlot centerlines
-from [SST-Workbench](../SST-Workbench) on Windows. Visual Studio/MSVC is not
-supported in this setup.
+## Do I need MSYS2 or Visual Studio Community?
 
-## One-time MSYS2 packages
+| Goal | Install MSYS2? | Install Visual Studio Community? | Install Python 3? |
+|------|----------------|----------------------------------|-------------------|
+| **Run a prebuilt zip** (GitHub Release) | **No** | **No** | **Yes** (only for KnotPlot `.txt` inputs; VECT-only can skip) |
+| **Build from source** | **Yes** — MinGW64 toolchain | **No** — MSVC / `cl.exe` is **not** supported | **Yes** (for `run_all.cmd`) |
 
-In a **MinGW64** shell (`C:\msys64\mingw64.exe`):
+Visual Studio may already be installed for other projects. That is fine. This
+tree still builds with **MSYS2 MinGW gcc**, not with a “x64 Native Tools”
+Developer Prompt. If both are installed, `run_all` calls
+`C:\msys64\mingw64\bin\cmake.exe` explicitly so generic / VS CMake on `PATH`
+cannot hijack the build.
+
+- MSYS2 installer: <https://www.msys2.org/> (default path `C:\msys64`)
+- Python installer: <https://www.python.org/downloads/windows/>
+- Do **not** install VS Community *for ridgerunner* — it will not help this build
+
+## Quick start (build from source)
+
+Sibling layout (same parent folder):
+
+- `ridge_tsnnls` — [designbynumbers/tsnnls](https://github.com/designbynumbers/tsnnls) (or SST fork)
+- `ridge_plcurve` — [designbynumbers/plcurve](https://github.com/designbynumbers/plcurve) (or SST fork)
+- `ridgerunner` — this repo
+- `ridge-prefix` — created by the build (`bin\ridgerunner.exe`, `ridgerunner_multithread.exe`)
+
+From **cmd.exe** or PowerShell (not a VS developer shell):
+
+```bat
+cd C:\workspace\projects\ridgerunner
+run_all.cmd
+```
+
+Useful flags:
+
+```bat
+run_all.cmd --fresh
+run_all.cmd --skip-deps
+run_all.cmd --package
+run_all.cmd --msys C:\msys64 --prefix ..\ridge-prefix
+```
+
+`run_all` will:
+
+1. Print the tooling banner (MSYS2 vs Visual Studio)
+2. Fail with an install URL if MSYS2 is missing
+3. `pacman -S --needed` the MinGW packages below
+4. CMake/Ninja install **tsnnls → plcurve → ridgerunner**
+5. Run ctest / OpenMP correctness when present
+6. With `--package`, write `dist\ridgerunner-2.3.1-windows-x64.zip`
+
+### One-time MSYS2 packages (also done by run_all)
+
+In a **MinGW64** shell (`C:\msys64\mingw64.exe`), or via `run_all`:
 
 ```sh
 pacman -S --needed \
@@ -16,38 +63,51 @@ pacman -S --needed \
   mingw-w64-x86_64-pkgconf \
   mingw-w64-x86_64-openblas \
   mingw-w64-x86_64-gsl \
-  mingw-w64-x86_64-argtable
+  mingw-w64-x86_64-argtable \
+  mingw-w64-x86_64-ntldd
 ```
 
-Sibling clones expected next to this repo:
+## Quick start (run portable zip — no MSYS2)
 
-- `../ridge_tsnnls`
-- `../ridge_plcurve`
-- `../SST-Workbench` (read-only reference / sample data)
+1. Download `ridgerunner-*-windows-x64.zip` from GitHub Releases
+2. Unzip anywhere
+3. Optional: `powershell -ExecutionPolicy Bypass -File .\install-user-path.ps1`
+4. `ridgerunner -a -s 1000 path\to\knot.txt`
 
-## Build
+See [windows/bundle/README.md](windows/bundle/README.md). Runtime MinGW DLLs
+ship inside `bin\`; you do **not** need MSYS2 or Visual Studio on the machine.
 
-From the MinGW64 shell:
+## PATH for a local (non-zip) build
 
-```sh
-cd /c/workspace/projects/ridgerunner
-./scripts/build-mingw.sh
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-user-path.ps1
 ```
 
-This installs into `../ridge-prefix` by default (`PREFIX` overrides).
+That adds `scripts\windows` to User PATH. The wrapper sets `ridge-prefix\bin`
+and `C:\msys64\mingw64\bin` for DLLs.
 
-Or manually:
+```bat
+ridgerunner -a -s 1000 C:\pad\naar\knotplot.txt
+set RIDGERUNNER_EXE=C:\workspace\projects\ridge-prefix\bin\ridgerunner_multithread.exe
+ridgerunner --Threads=8 -a -s 1000 C:\pad\naar\knotplot.txt
+```
+
+## Appendix: manual cmake (same as run_all)
+
+From a MinGW64 shell, with `/mingw64/bin` on `PATH`:
 
 ```sh
 export PREFIX=/c/workspace/projects/ridge-prefix
 export PATH="/mingw64/bin:$PATH"
 
 cmake -S ../ridge_tsnnls -B ../ridge_tsnnls/build-mingw -G Ninja \
-  -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PREFIX
 cmake --build ../ridge_tsnnls/build-mingw --target install
 
 cmake -S ../ridge_plcurve -B ../ridge_plcurve/build-mingw -G Ninja \
-  -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PREFIX
 cmake --build ../ridge_plcurve/build-mingw --target install
 
 cmake -S . -B build-mingw -G Ninja \
@@ -56,97 +116,19 @@ cmake -S . -B build-mingw -G Ninja \
 cmake --build build-mingw --target install
 ```
 
-## PATH for running
+Or: `./scripts/build-mingw.sh` (bash-only; prefer `run_all.cmd` on Windows).
 
-### Recommended: one-time User PATH for the `.txt` wrapper
+## CI / overlay
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-user-path.ps1
-```
-
-That adds `scripts\windows` to your **User** PATH. New terminals can then run:
-
-```bat
-ridgerunner -a -s 1000 C:\pad\naar\knotplot.txt
-```
-
-The wrapper (`ridgerunner.cmd`) sets `ridge-prefix\bin` and `C:\msys64\mingw64\bin`
-internally, converts XYZ `.txt` → VECT, runs `ridgerunner.exe`, and writes
-`knotplot_ridgerunned.txt` next to the input. Intermediate `knotplot.vect` and
-`knotplot.rr\` stay beside the input as well.
-
-Requires Python 3 on PATH for `.txt` runs. Plain VECT files are forwarded to
-`ridgerunner.exe` unchanged.
-
-### Manual PATH (MinGW shell / VECT-only)
-
-```sh
-export PATH="/c/workspace/projects/ridge-prefix/bin:/mingw64/bin:$PATH"
-```
-
-OpenBLAS DLLs live under `/mingw64/bin`; without that directory on `PATH`,
-`ridgerunner.exe` will fail to start.
-
-## KnotPlot workflow (SST-Workbench)
-
-### Easy path: `.txt` wrapper (recommended)
-
-```bat
-ridgerunner -a -s 1000 C:\workspace\projects\SST-Workbench\KnotPlot\knots\knot_3.1\T_2_3_trial_005k.txt
-```
-
-Output: `T_2_3_trial_005k_ridgerunned.txt` in the same folder as the input.
-
-Or call Python directly:
-
-```bat
-python tools\run_knotplot_txt.py -a -s 20 --NoOutputFiles path\to\knot.txt
-```
-
-### Manual path: convert then run VECT
-
-SST-Workbench stores KnotPlot exports as plain XYZ `.txt` files. Ridgerunner
-reads Geomview **VECT**. Convert with the existing helper (**do not modify
-SST-Workbench**):
-
-```powershell
-python .\SST-Workbench\KnotPlot\knotplot_txt_to_vect.py `
-  .\SST-Workbench\KnotPlot\knots\knot_3.1\T_2_3_trial_005k.txt
-```
-
-Docs: `SST-Workbench/KnotPlot/KNOTPLOT_TXT_TO_VECT_README.md`.
-
-Then tighten (recommended: autoscale + step limit):
-
-```sh
-ridgerunner -a -s 1000 T_2_3_trial_005k.vect
-```
-
-Output directory: `T_2_3_trial_005k.rr/` with `T_2_3_trial_005k.final.vect`.
-
-### Ready-made VECT sample
-
-```sh
-cp /c/workspace/projects/SST-Workbench/KnotPlot/T_2_3_trial_005k.vect .
-ridgerunner -a -s 20 --NoOutputFiles T_2_3_trial_005k.vect
-```
-
-### Multi-component link (optional)
-
-```sh
-python /c/workspace/projects/SST-Workbench/KnotPlot/knotplot_txt_to_vect.py \
-  /c/workspace/projects/SST-Workbench/KnotPlot/knots/Tlink_6_9/Tlink_6_9_D1_040k.txt
-ridgerunner -a -s 20 --NoOutputFiles Tlink_6_9_D1_040k.vect
-```
-
-VortexLab’s `knotplot_knots_data.js` Fourier catalog is a **separate** pipeline
-and is not an input to ridgerunner.
-
-Ideal-knot campaign scripts and run outputs live in SST-Workbench
-`KnotPlot/ridgerunner` (`run_ideal_knot.cmd`), not in this compile repo.
+GitHub Actions (`.github/workflows/windows-release.yml`) checks out pinned
+tsnnls/plcurve tags, applies `windows/deps-overlay/`, then runs the same
+`run_all.py --package`. Tags matching `*-win*` skip the Ubuntu source-tarball
+workflow.
 
 ## Notes
 
 - Curses display stays off on Windows (stdout progress).
 - Autotools (`./configure && make`) remains the Linux/macOS path; CMake is the
   Windows/MinGW path.
+- KnotPlot campaign scripts live in SST-Workbench; they are **not** in the
+  portable zip.
